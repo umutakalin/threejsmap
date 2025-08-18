@@ -1,4 +1,23 @@
-# Getting Started with Create React App
+# 3D Map with Bayraktar TB2 Drone
+
+Bu proje, Three.js kullanarak oluşturulmuş 3D harita üzerinde Bayraktar TB2 insansız hava aracının uçtuğu bir React uygulamasıdır.
+
+## Özellikler
+
+- **3D Harita**: Three.js ile oluşturulmuş detaylı 3D harita
+- **Bayraktar TB2 Drone**: Harita üzerinde belirli aralıklarla uçan drone'lar
+- **Kuş Sürüleri**: Gerçekçi kuş animasyonları
+- **Bulut Efektleri**: Dinamik bulut animasyonları
+- **Kamera Kontrolü**: Pan, zoom ve rotasyon kontrolleri
+
+## Drone Özellikleri
+
+- **Otomatik Uçuş**: Drone'lar harita dışından başlayıp karşı tarafa uçar
+- **Gerçekçi Animasyonlar**: Pervane dönüşü, hafif salınım ve rüzgar etkileri
+- **Özelleştirilebilir**: Hız, boyut ve sayı ayarlanabilir
+- **Sürekli Döngü**: Drone'lar sürekli olarak harita üzerinde uçar
+
+## Kurulum
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
