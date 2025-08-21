@@ -30,15 +30,10 @@ const Model: React.FC<ModelProps> = ({
 
     const modelRef = useRef<any>(null);
 
-    console.log('=== MODEL DEBUG BİLGİLERİ ===');
-    console.log('Diktörtgen oluşturuluyor...');
-    console.log('TEXTURE_PATH:', TEXTURE_PATH);
-    console.log('Texture durumu:', texture);
-    console.log('Texture yüklendi mi?', !!texture);
-    console.log('================================');
+    // Debug loglar kaldırıldı
 
     useEffect(() => {
-        console.log('=== DİKTÖRTGEN YÜKLEME DURUMU ===');
+        // Debug loglar kaldırıldı
 
         // Diktörtgen boyutları: 8800 x 4000
         const width = 8800;
@@ -46,35 +41,28 @@ const Model: React.FC<ModelProps> = ({
         const size = new Vector3(width, 1, height); // Yükseklik 1 (düz diktörtgen)
         const center = new Vector3(0, 0, 0);
 
-        console.log('Diktörtgen boyutları:', size);
-        console.log('Diktörtgen merkezi:', center);
+        // Debug loglar kaldırıldı
 
         if (onModelLoaded) {
             onModelLoaded(size, center);
         }
 
-        console.log('==============================');
+        // Debug loglar kaldırıldı
     }, [onModelLoaded]);
 
     // Texture ayarlarını optimize et
     useEffect(() => {
         if (texture && enableKTX2Texture) {
-            console.log('Texture ayarları yapılıyor...');
             texture.wrapS = texture.wrapT = 1001; // ClampToEdgeWrapping
             texture.repeat.set(-textureRepeatX, textureRepeatY); // X ekseninde ayna efekti
             texture.offset.set(textureOffsetX, textureOffsetY);
             texture.center.set(0.5, 0.5);
             texture.rotation = Math.PI; // 180 derece döndür
             texture.needsUpdate = true;
-            console.log('Texture ayarları tamamlandı - X ekseninde ayna efekti + 180 derece döndürüldü');
         }
     }, [texture, enableKTX2Texture, textureRepeatX, textureRepeatY, textureOffsetX, textureOffsetY]);
 
-    console.log('=== DİKTÖRTGEN RENDER DURUMU ===');
-    console.log('Diktörtgen render ediliyor');
-    console.log('Texture var mı?', !!texture);
-    console.log('Texture yüklendi mi?', texture?.isTexture);
-    console.log('============================');
+    // Debug loglar kaldırıldı
 
     return (
         <>

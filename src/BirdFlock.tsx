@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { Vector3, Group, Object3D, SphereGeometry, MeshStandardMaterial, Mesh } from 'three';
+import { Vector3, Group, Object3D, SphereGeometry, MeshStandardMaterial, Mesh, BufferGeometry, Float32BufferAttribute } from 'three';
 import { gsap } from 'gsap';
 
 interface BirdFlockProps {
@@ -30,11 +30,110 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
     size,
     birdCount
 }) => {
-    const { scene } = useGLTF('/3dmap/bird.glb');
+    const { scene } = useGLTF((process.env.PUBLIC_URL || '') + '/bird.glb');
     const flockRef = useRef<Group>(null);
     const birdsRef = useRef<Object3D[]>([]);
+    const birdWingNodesRef = useRef<Object3D[][]>([]); // Her kuş için kanat düğümlerini önbelleğe al
+    // Kanat shader materyali kaldırıldı
     const animationRef = useRef<gsap.core.Timeline | null>(null);
     const isVisibleRef = useRef(true);
+    // Kanat shader'ları kaldırıldı
+
+    // GLB yerine kodla üretilmiş düşük poligon kuş kullan (resimdeki gibi)
+    const USE_PROCEDURAL_BIRD = true;
+
+    // Basit üçgen geometrisi oluşturucu
+    const createTriangleGeometry = (v0: Vector3, v1: Vector3, v2: Vector3) => {
+        const geometry = new BufferGeometry();
+        const vertices = new Float32BufferAttribute(
+            new Float32Array([
+                v0.x, v0.y, v0.z,
+                v1.x, v1.y, v1.z,
+                v2.x, v2.y, v2.z,
+            ]),
+            3
+        );
+        geometry.setAttribute('position', vertices);
+        geometry.setIndex([0, 1, 2]);
+        geometry.computeVertexNormals();
+        return geometry;
+    };
+
+    // Resimdeki gibi düşük poligon kuşu oluşturan yardımcı
+    const createProceduralBird = (): Group => {
+        const bird = new Group();
+        bird.name = 'proceduralBird';
+
+        const material = new MeshStandardMaterial({
+            color: 0xffffff,
+            emissive: 0x222222,
+            metalness: 0.0,
+            roughness: 0.2,
+            side: 2,
+        });
+
+        // Gövde (ince dikey plaka)
+        const body = new Mesh(
+            createTriangleGeometry(
+                new Vector3(0, 0.35, -0.05),
+                new Vector3(0, -0.5, 0.0),
+                new Vector3(0, -0.5, -0.2)
+            ),
+            material
+        );
+        body.name = 'body';
+        bird.add(body);
+
+        // Üst yüzgeç (dorsal) - küçük üçgen
+        const dorsal = new Mesh(
+            createTriangleGeometry(
+                new Vector3(0, 0.35, -0.05),
+                new Vector3(0.12, 0.6, -0.05),
+                new Vector3(-0.12, 0.6, -0.05)
+            ),
+            material
+        );
+        dorsal.name = 'dorsal';
+        bird.add(dorsal);
+
+        // Kuyruk (dikey üçgen)
+        const tail = new Mesh(
+            createTriangleGeometry(
+                new Vector3(0, -0.4, -0.25),
+                new Vector3(0.0, -1.05, -0.45),
+                new Vector3(0.0, -0.7, -0.1)
+            ),
+            material
+        );
+        tail.name = 'tail';
+        bird.add(tail);
+
+        // Sağ kanat (geniş üçgen plaka)
+        const rightWing = new Mesh(
+            createTriangleGeometry(
+                new Vector3(0.0, -0.05, -0.05),   // kök
+                new Vector3(2.4, 0.0, -0.6),      // uç
+                new Vector3(0.0, -0.25, -1.1)     // arka kök
+            ),
+            material
+        );
+        rightWing.name = 'rightWing';
+        bird.add(rightWing);
+
+        // Sol kanat (ayna görüntüsü)
+        const leftWing = new Mesh(
+            createTriangleGeometry(
+                new Vector3(0.0, -0.05, -0.05),   // kök
+                new Vector3(-2.4, 0.0, -0.6),     // uç
+                new Vector3(0.0, -0.25, -1.1)     // arka kök
+            ),
+            material
+        );
+        leftWing.name = 'leftWing';
+        bird.add(leftWing);
+
+        return bird;
+    };
 
     // Kuş pozisyonlarını hesapla (üçgen formasyon için)
     const birdPositions = useMemo(() => {
@@ -65,76 +164,56 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
         return positions;
     }, [size]);
 
-    // Rastgele başlangıç pozisyonu oluştur (GLB dışından)
+    // Rastgele başlangıç pozisyonu oluştur (sadece X yönünde - doğudan batıya veya batıdan doğuya)
     const generateRandomStartPosition = () => {
         const mapBounds = 2500; // GLB dosyasının dışındaki sınırlar
         // Dinamik yükseklik sistemi kullanılacak, burada sadece temel yükseklik
-        const height = 10;
+        const height = 2; // 4 kat daha alçak: 5 → 2
 
-        // Kenarlardan rastgele bir pozisyon seç (GLB dışından)
-        const side = Math.floor(Math.random() * 4);
+        // Sadece X ekseninde başla (doğu veya batı)
+        const side = Math.floor(Math.random() * 2); // Sadece 2 yön: doğu veya batı
         let x, z;
 
         switch (side) {
-            case 0: // Kuzey (GLB dışı)
-                x = (Math.random() - 0.5) * mapBounds;
-                z = -mapBounds - Math.random() * 500;
-                break;
-            case 1: // Doğu (GLB dışı)
+            case 0: // Doğu (GLB dışı)
                 x = mapBounds + Math.random() * 500;
-                z = (Math.random() - 0.5) * mapBounds;
+                z = (Math.random() - 0.5) * mapBounds; // Z ekseninde rastgele pozisyon
                 break;
-            case 2: // Güney (GLB dışı)
-                x = (Math.random() - 0.5) * mapBounds;
-                z = mapBounds + Math.random() * 500;
-                break;
-            case 3: // Batı (GLB dışı)
+            case 1: // Batı (GLB dışı)
                 x = -mapBounds - Math.random() * 500;
-                z = (Math.random() - 0.5) * mapBounds;
+                z = (Math.random() - 0.5) * mapBounds; // Z ekseninde rastgele pozisyon
                 break;
         }
 
         return new Vector3(x, height, z);
     };
 
-    // Rastgele bitiş pozisyonu oluştur (GLB dışına)
+    // Rastgele bitiş pozisyonu oluştur (sadece X yönünde - karşı tarafa)
     const generateRandomEndPosition = (startPos: Vector3) => {
         const mapBounds = 2500;
         // Dinamik yükseklik sistemi kullanılacak, burada sadece temel yükseklik
-        const height = 10;
+        const height = 2; // 4 kat daha alçak: 5 → 2
 
-        // Başlangıç pozisyonunun karşı tarafına git (GLB dışına)
+        // Başlangıç pozisyonunun karşı tarafına git (sadece X ekseninde)
         let x, z;
 
         if (startPos.x < -mapBounds) { // Batıdan başladıysa doğuya git
             x = mapBounds + Math.random() * 500;
-            z = (Math.random() - 0.5) * mapBounds;
+            z = startPos.z; // Aynı Z pozisyonunda kal
         } else if (startPos.x > mapBounds) { // Doğudan başladıysa batıya git
             x = -mapBounds - Math.random() * 500;
-            z = (Math.random() - 0.5) * mapBounds;
-        } else { // Güneyden başladıysa kuzeye git
-            x = (Math.random() - 0.5) * mapBounds;
-            z = -mapBounds - Math.random() * 500;
+            z = startPos.z; // Aynı Z pozisyonunda kal
         }
 
         return new Vector3(x, height, z);
     };
 
-    // Gerçekçi kanat çırpma animasyonu için yardımcı fonksiyon
-    const applyWingFlapping = (bird: Object3D, wingPhase: number, isChick: boolean) => {
-        // Kanat çırpma sırasında hafif süzülme efekti
-        const glidingEffect = Math.sin(wingPhase * 0.3) * 0.05;
-
-        // Kanat çırpma sırasında hafif ileri itme
-        const forwardThrust = Math.abs(Math.sin(wingPhase)) * 0.03;
-
-        // Kuşun pozisyonunu güncelle
-        bird.position.y += glidingEffect;
-        bird.position.z += forwardThrust;
-
-        // Kanat çırpma sırasında hafif rotasyon
-        const bodyRotation = Math.sin(wingPhase * 0.2) * 0.02;
-        bird.rotation.z += bodyRotation;
+    // Kanat çırpma için yardımcı fonksiyon (hafif Y kaldırma ve Z ileri-geri)
+    const applyWingFlapping = (bird: Object3D, wingPhase: number) => {
+        const liftEffect = Math.abs(Math.sin(wingPhase)) * 0.02;
+        const zMovement = Math.sin(wingPhase * 0.6) * 0.02;
+        bird.position.y += liftEffect;
+        bird.position.z += zMovement;
     };
 
     // Kuşları oluştur
@@ -146,12 +225,13 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
             flockRef.current.remove(flockRef.current.children[0]);
         }
         birdsRef.current = [];
+        birdWingNodesRef.current = [];
 
         // Her kuş için tek klon oluştur
         birdPositions.forEach((birdProps, index) => {
             let birdObject: Object3D;
 
-            if (scene) {
+            if (scene && !USE_PROCEDURAL_BIRD) {
                 // GLB modeli varsa onu kullan
                 birdObject = scene.clone();
 
@@ -195,52 +275,30 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
                                 }
                             });
                         } else {
-                            // Ana renk - tamamen beyaz
+                            // Tüm mesh'ler için standart beyaz materyal ayarları (kanat shader'ı yok)
                             child.material.color.setHex(0xffffff);
-
-                            // Emissive - hafif beyaz parlaklık ekle
                             child.material.emissive.setHex(0x222222);
-
-                            // Tüm yeşil tonlarını kaldırmak için ek ayarlar
                             child.material.metalness = 0.0;
                             child.material.roughness = 0.1;
-
-                            // Eğer texture varsa, onu da beyaz yap
                             if (child.material.map) {
                                 child.material.map = null;
                             }
-
-                            // Vertex colors varsa onları da beyaz yap
                             if (child.material.vertexColors) {
                                 child.material.vertexColors = false;
                             }
-
-                            // Specular ve diğer renk özelliklerini sıfırla
                             if (child.material.specular) {
                                 child.material.specular.setHex(0x000000);
                             }
-
-                            // Sheen rengi varsa onu da beyaz yap
                             if (child.material.sheenColor) {
                                 child.material.sheenColor.setHex(0xffffff);
                             }
-
                             child.material.needsUpdate = true;
                         }
                     }
                 });
             } else {
-                // GLB modeli yoksa basit küre oluştur - tamamen beyaz
-                const geometry = new SphereGeometry(1.0, 12, 8);
-                const material = new MeshStandardMaterial({
-                    color: 0xffffff, // Tamamen beyaz
-                    emissive: 0x222222, // Hafif beyaz parlaklık
-                    metalness: 0.0, // Metalik olmasın
-                    roughness: 0.1, // Daha pürüzsüz
-                    transparent: false,
-                    opacity: 1.0
-                });
-                birdObject = new Mesh(geometry, material);
+                // GLB kullanılmıyorsa resimdeki gibi düşük poligon kuş modeli oluştur
+                birdObject = createProceduralBird();
             }
 
             // Kuş pozisyonunu ayarla
@@ -251,9 +309,26 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
             // Yavru kuş bilgisini sakla
             (birdObject as any).isChick = birdProps.isChick;
 
+            // Bu kuş için kanat düğümlerini tespit et ve önbelleğe al (derin traverse)
+            const wingNodes: Object3D[] = [];
+            birdObject.traverse((child: any) => {
+                const childName = (child.name || '').toLowerCase();
+                if (
+                    childName.includes('wing') ||
+                    childName.includes('kanat') ||
+                    childName.includes('left') ||
+                    childName.includes('sol') ||
+                    childName.includes('right') ||
+                    childName.includes('sağ')
+                ) {
+                    wingNodes.push(child as Object3D);
+                }
+            });
+
             // Sürüye ekle
             flockRef.current!.add(birdObject);
             birdsRef.current.push(birdObject);
+            birdWingNodesRef.current.push(wingNodes);
         });
     };
 
@@ -263,7 +338,9 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
 
         const startPos = generateRandomStartPosition();
         const endPos = generateRandomEndPosition(startPos);
-        const flightSpeed = speed + Math.random() * 1; // Rastgele hız varyasyonu
+        // Hız %40 düşürülsün => süre 1/0.6 ≈ 1.666x artırılır
+        const durationMultiplier = 1 / 0.6;
+        const flightDuration = (speed + Math.random() * 1) * durationMultiplier; // Daha uzun süre = daha yavaş uçuş
 
         // Kuşları görünür yap
         flockRef.current.visible = true;
@@ -289,7 +366,7 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
         });
 
         animationRef.current.to(flockRef.current, {
-            duration: flightSpeed,
+            duration: flightDuration,
             ease: "none",
             onUpdate: () => {
                 if (flockRef.current && animationRef.current) {
@@ -297,14 +374,14 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
                     const progress = animationRef.current.progress();
                     const currentPosition = new Vector3().lerpVectors(startPos, endPos, progress);
 
-                    // Dinamik yükseklik sistemi - ekranın yukarısına çıktıkça yükseklik azalsın, aşağıya indikçe artsın
+                    // Dinamik yükseklik sistemi - güneyden kuzeye giderken yükselsin
                     const screenHeight = 2500; // Ekran yüksekliği (harita sınırları)
                     const normalizedY = (currentPosition.z + screenHeight) / (2 * screenHeight); // 0-1 arası normalize edilmiş Y pozisyonu
 
-                    // Yükseklik hesaplama: üstte çok, altta az (tersine çevrilmiş)
-                    const baseHeight = 60; // Temel yükseklik (kuşlar için yüksek)
-                    const heightVariation = 50; // Yükseklik değişim miktarı
-                    const dynamicHeight = baseHeight - (normalizedY * heightVariation); // Tersine çevrilmiş formül
+                    // Yükseklik hesaplama: güneyde alçak, kuzeyde yüksek (2x daha yüksek)
+                    const baseHeight = 30; // Temel yükseklik (önceki 15'in 2 katı)
+                    const heightVariation = 24; // Yükseklik değişim miktarı (önceki 12'nin 2 katı)
+                    const dynamicHeight = baseHeight + (normalizedY * heightVariation); // Normal formül (güneyde alçak, kuzeyde yüksek)
 
                     // Y pozisyonunu dinamik yükseklikle güncelle
                     currentPosition.y = dynamicHeight;
@@ -352,111 +429,47 @@ const BirdFlock: React.FC<BirdFlockProps> = ({
 
         const time = state.clock.elapsedTime;
 
-        // Kuşların gerçekçi kanat çırpma animasyonu
+        // Kuşların kanat çırpma animasyonu (hafif)
         birdsRef.current.forEach((bird, index) => {
             const isChick = (bird as any).isChick;
 
-            // Kanat çırpma hızı ve genişliği
-            const baseWingSpeed = isChick ? 12 : 8; // Yavrular daha hızlı
-            const wingSpeed = baseWingSpeed + index * 0.5; // Her kuş için farklı hız
-            const wingAmplitude = isChick ? 1.5 : 1.2; // Yavrular daha geniş kanat çırpar
-
-            // Gerçekçi kanat çırpma animasyonu (asimetrik)
-            const wingPhase = time * wingSpeed;
-            const wingAngle = Math.sin(wingPhase) * wingAmplitude;
-
-            // Kanat çırpma sırasında hafif yukarı-aşağı hareket
-            const liftEffect = Math.abs(Math.sin(wingPhase)) * 0.1;
-
-            // Kanat animasyonu (eğer kuş modelinde kanat mesh'leri varsa)
-            if (scene) {
-                bird.children.forEach((child: any) => {
-                    const childName = child.name.toLowerCase();
-
-                    // Sol kanat animasyonu
-                    if (childName.includes('left') || childName.includes('sol')) {
-                        child.rotation.z = wingAngle;
-                        child.rotation.x = Math.sin(wingPhase * 0.7) * 0.4;
-                        child.rotation.y = Math.sin(wingPhase * 0.5) * 0.2;
-                    }
-                    // Sağ kanat animasyonu (sol kanatla ters fazda)
-                    else if (childName.includes('right') || childName.includes('sağ')) {
-                        child.rotation.z = -wingAngle; // Ters faz
-                        child.rotation.x = Math.sin(wingPhase * 0.7 + Math.PI) * 0.4;
-                        child.rotation.y = Math.sin(wingPhase * 0.5 + Math.PI) * 0.2;
-                    }
-                    // Genel kanat mesh'leri
-                    else if (childName.includes('wing') || childName.includes('kanat')) {
-                        child.rotation.z = wingAngle;
-                        child.rotation.x = Math.sin(wingPhase * 0.7) * 0.3;
-                    }
-                    // Gövde için hafif salınım (kanat çırpmaya uyumlu)
-                    else if (childName.includes('body') || childName.includes('torso') || childName.includes('gövde')) {
-                        child.rotation.z = Math.sin(wingPhase * 0.3) * 0.05;
-                        child.rotation.x = Math.sin(wingPhase * 0.2) * 0.03;
-                    }
-                    // Kuyruk animasyonu (kanat çırpmaya uyumlu)
-                    else if (childName.includes('tail') || childName.includes('kuyruk')) {
-                        child.rotation.z = Math.sin(wingPhase * 0.4) * 0.15;
-                        child.rotation.y = Math.sin(wingPhase * 0.3) * 0.1;
-                    }
-                    // Baş animasyonu
-                    else if (childName.includes('head') || childName.includes('baş')) {
-                        child.rotation.y = Math.sin(wingPhase * 0.2) * 0.1;
-                        child.rotation.x = Math.sin(wingPhase * 0.1) * 0.05;
-                    }
-                });
-
-                // Kuşun genel pozisyonunu kanat çırpmaya göre ayarla
-                bird.position.y += liftEffect;
-
-                // Gerçekçi kanat çırpma efektlerini uygula
-                applyWingFlapping(bird, wingPhase, isChick);
-
-            } else {
-                // GLB modeli yoksa basit küre için kanat çırpma efekti
-                // Küreyi yatay olarak sıkıştırıp genişleterek kanat efekti yarat
-                const scaleX = 1 + Math.abs(Math.sin(wingPhase)) * 0.3;
-                const scaleY = 1 - Math.abs(Math.sin(wingPhase)) * 0.2;
-                const scaleZ = 1 + Math.abs(Math.sin(wingPhase)) * 0.1;
-
-                bird.scale.set(scaleX, scaleY, scaleZ);
-
-                // Hafif rotasyon animasyonu
-                bird.rotation.z = Math.sin(wingPhase * 0.5) * 0.3;
-                bird.rotation.x = Math.sin(wingPhase * 0.3) * 0.2;
-
-                // Yukarı-aşağı hareket
-                bird.position.y += liftEffect;
-
-                // Gerçekçi kanat çırpma efektlerini uygula
-                applyWingFlapping(bird, wingPhase, isChick);
-            }
-
-            // Yavru kuşlar için ek animasyonlar
+            // Yavru kuşlar için ek animasyonlar - 4 kat daha az
             if (isChick) {
-                // Yavrular daha fazla salınım yapar
-                bird.position.y += Math.sin(time * 3) * 0.08;
-                bird.rotation.x = Math.sin(time * 2.5) * 0.15;
-                bird.rotation.y = Math.sin(time * 1.8) * 0.08;
+                // Yavrular daha fazla salınım yapar ama 4 kat daha az
+                bird.position.y += Math.sin(time * 3) * 0.02; // 0.04 → 0.02
+                bird.rotation.x = Math.sin(time * 2.5) * 0.0375; // 0.075 → 0.0375
+                bird.rotation.y = Math.sin(time * 1.8) * 0.02; // 0.04 → 0.02
             } else {
-                // Yetişkin kuşlar için daha yumuşak hareket
-                bird.position.y += Math.sin(time * 1.5) * 0.03;
-                bird.rotation.x = Math.sin(time * 1.2) * 0.03;
+                // Yetişkin kuşlar için daha yumuşak hareket - 4 kat daha az
+                bird.position.y += Math.sin(time * 1.5) * 0.0075; // 0.015 → 0.0075
+                bird.rotation.x = Math.sin(time * 1.2) * 0.0075; // 0.015 → 0.0075
             }
 
-            // Tüm kuşlar için genel uçuş hareketi (kanat çırpmaya uyumlu)
-            const flightWobble = Math.sin(time * 1.1) * 0.015;
+            // Tüm kuşlar için genel uçuş hareketi
+            const flightWobble = Math.sin(time * 1.1) * 0.00375; // 0.0075 → 0.00375
             bird.position.x += flightWobble;
-            bird.position.z += Math.cos(time * 1.0) * 0.015;
+            bird.position.z += Math.cos(time * 1.0) * 0.008;
 
-            // Kanat çırpma sırasında hafif ileri-geri hareket
-            const forwardBackward = Math.sin(wingPhase * 0.5) * 0.02;
-            bird.position.z += forwardBackward;
+            // Kanat çırpma: yavrular daha hızlı çırpar
+            const baseWingSpeed = isChick ? 12 : 8;
+            const wingSpeed = baseWingSpeed + index * 0.5;
+            const wingPhase = time * wingSpeed;
 
-            // Kanat çırpma sırasında hafif dönme efekti (gerçekçi uçuş)
-            const wingRotationEffect = Math.sin(wingPhase * 0.8) * 0.01;
-            bird.rotation.y += wingRotationEffect;
+            // Kanat parçalarına hafif rotasyon uygula (derin düğümler dahil)
+            const wingNodes = birdWingNodesRef.current[index] || [];
+            for (const child of wingNodes as any[]) {
+                const childName = (child.name || '').toLowerCase();
+                if (childName.includes('left') || childName.includes('sol')) {
+                    child.rotation.z = Math.sin(wingPhase) * (isChick ? 1.1 : 0.9);
+                } else if (childName.includes('right') || childName.includes('sağ')) {
+                    child.rotation.z = -Math.sin(wingPhase) * (isChick ? 1.1 : 0.9);
+                } else if (childName.includes('wing') || childName.includes('kanat')) {
+                    child.rotation.z = Math.sin(wingPhase) * 0.9;
+                }
+            }
+
+            // Gövdeye çok hafif lift ve z-ileri/geri ekle
+            applyWingFlapping(bird, wingPhase);
         });
     });
 

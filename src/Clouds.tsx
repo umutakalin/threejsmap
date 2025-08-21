@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
-import { useLoader, useFrame } from '@react-three/fiber';
-import { PlaneGeometry, MeshBasicMaterial, Mesh, TextureLoader, RepeatWrapping, Vector2 } from 'three';
+import { useLoader, useFrame, useThree } from '@react-three/fiber';
+import { PlaneGeometry, MeshBasicMaterial, Mesh, TextureLoader, RepeatWrapping, Vector2, LinearFilter, LinearMipmapLinearFilter, MultiplyBlending } from 'three';
 
 interface Cloud {
     mesh: Mesh;
@@ -9,98 +9,127 @@ interface Cloud {
     position: Vector2;
     direction: { x: number; z: number }; // Hareket yönü
     speed: number; // Hareket hızı
+    baseHeight?: number; // Bulutun temel yüksekliği
+    heightVariation?: number; // Bulutun yükseklik varyasyonu
+    zDriftAmplitude?: number; // Z ekseninde dalgalanma genliği
+    zDriftSpeed?: number; // Z ekseninde dalgalanma hızı
+    zDriftPhase?: number; // Faz
+    laneZ?: number; // Bu bulutun şeridi
 }
 
 const Clouds: React.FC = () => {
     const cloudsRef = useRef<Cloud[]>([]);
     const cloudsTexture = useLoader(TextureLoader, '/3dmap/gl/clouds.png');
+    const { gl } = useThree();
+    const HEIGHT_SCALE = 0.5; // Bulut yüksekliği ölçeği (50% düşür)
 
     useEffect(() => {
         if (cloudsTexture) {
             cloudsTexture.wrapS = RepeatWrapping;
             cloudsTexture.wrapT = RepeatWrapping;
             cloudsTexture.repeat.set(2, 1);
+            // Flicker azaltmak için filtreleme ve anizotropi
+            cloudsTexture.minFilter = LinearMipmapLinearFilter;
+            cloudsTexture.magFilter = LinearFilter;
+            // MultiplyBlending ile doğru sonuç için alpha'yı ön çarp
+            cloudsTexture.premultiplyAlpha = true;
+            cloudsTexture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy?.() || 8);
             cloudsTexture.needsUpdate = true;
         }
-    }, [cloudsTexture]);
+    }, [cloudsTexture, gl]);
 
     useEffect(() => {
         if (!cloudsTexture || cloudsRef.current.length > 0) return;
 
         const clouds: Cloud[] = [];
         const mapSize = 2500;
-        const minDistance = 1500; // 📏 Minimum bulutlar arası mesafe
-        const maxTries = 50;
+        const minZGap = 900; // Bulutlar arası minimum Z boşluğu
+        const maxTries = 60;
 
-        // Tüm bulutlar X ekseninde (soldan sağa) hareket etsin
-        const movementDirection = { x: 1, z: 0 }; // Doğuya doğru (soldan sağa)
+        // X ekseninde hareket
+        const movementDirection = { x: 1, z: 0 };
 
-        for (let i = 0; i < 3; i++) {
-            const baseSize = 400 + Math.random() * 400;
-            const cloudSize = baseSize * 3;
+        // Şeritleri belirle: her şeritte tek bulut
+        const lanesZ = [-1000, 0, 1000];
+        const cloudCount = lanesZ.length; // Her şeride 1 bulut
 
-            const geometry = new PlaneGeometry(cloudSize, cloudSize * 0.4);
+        for (let i = 0; i < cloudCount; i++) {
+            // Boyut çeşitliliği
+            const baseSize = (300 + Math.random() * 2500) * 2; // 2 kat büyük
+            const aspect = 0.35 + Math.random() * 0.25;
+            const cloudSizeX = baseSize;
+            const cloudSizeY = baseSize * aspect;
+
+            const geometry = new PlaneGeometry(cloudSizeX, cloudSizeY);
             const material = new MeshBasicMaterial({
                 map: cloudsTexture,
                 transparent: true,
-                opacity: 0.7 + Math.random() * 0.2,
-                alphaTest: 0.3,
+                opacity: 0.45 + Math.random() * 0.2,
+                alphaTest: 0.0,
                 side: 2,
                 depthWrite: false
             });
 
             const mesh = new Mesh(geometry, material);
 
-            // Gölge mesh'i oluştur - bulut şeklinde
-            const shadowGeometry = new PlaneGeometry(cloudSize * 0.9, cloudSize * 0.4);
+            // Gölge mesh'i
+            const shadowGeometry = new PlaneGeometry(cloudSizeX * 0.9, cloudSizeY);
             const shadowMaterial = new MeshBasicMaterial({
-                map: cloudsTexture, // Aynı bulut texture'ını kullan
-                color: 0x000000, // Siyah renk
+                map: cloudsTexture,
+                color: 0x000000,
                 transparent: true,
-                opacity: 0.3, // Daha sabit opacity
-                alphaTest: 0.1, // Daha düşük alpha test
+                opacity: 0.25 + Math.random() * 0.1,
+                alphaTest: 0.0,
                 side: 2,
-                depthWrite: true, // Gölge derinlik yazımını aktif et
-                depthTest: true // Derinlik testini aktif et
+                depthWrite: false,
+                depthTest: true,
+                blending: MultiplyBlending,
+                toneMapped: false,
+                premultipliedAlpha: true
             });
 
             const shadowMesh = new Mesh(shadowGeometry, shadowMaterial);
 
-            // Tüm bulutlar aynı yönde (soldan sağa) hareket etsin
             const direction = movementDirection;
 
-            // Her bulut için farklı başlangıç pozisyonu
-            const startX = -2000 + (i * 800); // Her bulut 800 birim arayla başlasın
-            const startZ = (Math.random() - 0.5) * mapSize; // Rastgele Z pozisyonu
+            // Başlangıç konumları – her şeritte tek bulut, X başlangıcı geniş aralıkta
+            const startX = -2500 - Math.random() * 1200 - i * 200; // Farklı büyük offset'ler
+            const laneZ = lanesZ[i];
+            const position = new Vector2(startX, laneZ);
 
-            const position = new Vector2(startX, startZ);
+            // Bulut başına yükseklik parametreleri
+            const cloudBase = 300 + Math.random() * 400;
+            const cloudVar = 180 + Math.random() * 320;
+            const screenHeight = 2500;
+            const normalizedY = (position.y + screenHeight) / (2 * screenHeight);
+            const dynamicHeight = (cloudBase + (normalizedY * cloudVar)) * HEIGHT_SCALE;
 
-            // Dinamik yükseklik sistemi - ekranın yukarısına çıktıkça yükseklik azalsın, aşağıya indikçe artsın
-            const screenHeight = 2500; // Ekran yüksekliği (harita sınırları)
-            const normalizedY = (position.y + screenHeight) / (2 * screenHeight); // 0-1 arası normalize edilmiş Y pozisyonu
-
-            // Yükseklik hesaplama: üstte çok, altta az (tersine çevrilmiş)
-            const baseHeight = 500; // Temel yükseklik (bulutlar için yüksek)
-            const heightVariation = 350; // Yükseklik değişim miktarı
-            const dynamicHeight = baseHeight - (normalizedY * heightVariation); // Tersine çevrilmiş formül
+            // Z-drift kapalı tut (şeritler sabit kalsın)
+            const zDriftAmplitude = 0;
+            const zDriftSpeed = 0;
+            const zDriftPhase = 0;
 
             mesh.position.set(position.x, dynamicHeight, position.y);
             mesh.rotation.x = -Math.PI / 2;
+            mesh.renderOrder = 2;
 
-            // Gölge pozisyonunu ayarla (harita üzerinde) - daha yüksek Y pozisyonu
             shadowMesh.position.set(position.x, 5, position.y);
             shadowMesh.rotation.x = -Math.PI / 2;
-
-            // Gölge için sabit scale (değişken scale kaldırıldı)
-            shadowMesh.scale.set(1.0, 1.0, 1.0);
+            shadowMesh.renderOrder = 1;
 
             clouds.push({
                 mesh,
                 shadowMesh,
                 opacity: material.opacity,
                 position,
-                direction: direction, // Hareket yönünü sakla
-                speed: 20 + (i * 15) + Math.random() * 10 // Her bulut farklı hızda (20-65 arası)
+                direction,
+                speed: 20 + Math.random() * 50,
+                baseHeight: cloudBase,
+                heightVariation: cloudVar,
+                zDriftAmplitude,
+                zDriftSpeed,
+                zDriftPhase,
+                laneZ,
             });
         }
 
@@ -109,6 +138,7 @@ const Clouds: React.FC = () => {
 
     // Bulut animasyonu - X ekseninde hareket (soldan sağa)
     useFrame((state, delta) => {
+        const time = state.clock.elapsedTime;
         cloudsRef.current.forEach((cloud, index) => {
             // Sadece X ekseninde hareket (soldan sağa)
             const moveX = delta * cloud.speed;
@@ -116,33 +146,41 @@ const Clouds: React.FC = () => {
             cloud.mesh.position.x += moveX;
             cloud.shadowMesh.position.x += moveX;
 
-            // Dinamik yükseklik güncelleme - hareket sırasında sürekli yükseklik ayarı
+            // Z-drift ve dinamik yükseklik güncelleme
             const screenHeight = 2500; // Ekran yüksekliği (harita sınırları)
-            const normalizedY = (cloud.mesh.position.z + screenHeight) / (2 * screenHeight); // 0-1 arası normalize edilmiş Y pozisyonu
-
-            // Yükseklik hesaplama: üstte çok, altta az (tersine çevrilmiş)
-            const baseHeight = 500; // Temel yükseklik (bulutlar için yüksek)
-            const heightVariation = 350; // Yükseklik değişim miktarı
-            const dynamicHeight = baseHeight - (normalizedY * heightVariation); // Tersine çevrilmiş formül
+            const currentZ = cloud.laneZ ?? cloud.position.y; // Şerit Z'si sabit
+            const normalizedY = (currentZ + screenHeight) / (2 * screenHeight);
+            const dynamicHeight = ((cloud.baseHeight || 500) + (normalizedY * (cloud.heightVariation || 350))) * HEIGHT_SCALE;
 
             // Y pozisyonunu dinamik yükseklikle güncelle
             cloud.mesh.position.y = dynamicHeight;
+            cloud.mesh.position.z = currentZ;
+            cloud.shadowMesh.position.z = currentZ;
 
             // Bulut haritanın dışına çıktığında sol tarafa geri döndür
             const edgeLimit = 2500;
 
             if (cloud.mesh.position.x > edgeLimit) {
-                cloud.mesh.position.x = -edgeLimit;
-                cloud.shadowMesh.position.x = -edgeLimit;
+                // Şerit bazlı reset – aynı şeritte tek bulut kalır
+                const newX = -edgeLimit - 800 - Math.random() * 1200; // Büyük aralık
+                const newZ = cloud.laneZ ?? cloud.position.y;
+                cloud.mesh.position.x = newX;
+                cloud.shadowMesh.position.x = newX;
+                cloud.position.y = newZ;
 
-                // Yeniden konumlandırıldığında dinamik yüksekliği güncelle
-                const resetNormalizedY = (cloud.mesh.position.z + screenHeight) / (2 * screenHeight);
-                const resetDynamicHeight = baseHeight - (resetNormalizedY * heightVariation); // Tersine çevrilmiş formül
+                // Şerit sabit; drift kapalı
+                cloud.baseHeight = 300 + Math.random() * 400;
+                cloud.heightVariation = 180 + Math.random() * 320;
+                cloud.speed = 20 + Math.random() * 50;
+
+                const resetNormalizedY = (newZ + screenHeight) / (2 * screenHeight);
+                const resetDynamicHeight = (cloud.baseHeight + (resetNormalizedY * cloud.heightVariation)) * HEIGHT_SCALE;
                 cloud.mesh.position.y = resetDynamicHeight;
+                cloud.mesh.position.z = newZ;
+                cloud.shadowMesh.position.z = newZ;
             }
 
-            // Gölge opacity'sini sabit tut (animasyon kaldırıldı)
-            (cloud.shadowMesh.material as MeshBasicMaterial).opacity = 0.3;
+            // Opacity sabit (her frame set etmeye gerek yok)
         });
     });
 

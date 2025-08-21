@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { Vector3, Group, CylinderGeometry, MeshStandardMaterial, Mesh } from 'three';
+import { Vector3, Group, CylinderGeometry, MeshBasicMaterial, Mesh } from 'three';
 import { gsap } from 'gsap';
 
 interface DroneProps {
@@ -26,60 +26,28 @@ const Drone: React.FC<DroneProps> = ({
     const animationRef = useRef<gsap.core.Timeline | null>(null);
     const isVisibleRef = useRef(true);
 
-    // Rastgele başlangıç pozisyonu oluştur (harita dışından)
+    // Rastgele başlangıç pozisyonu oluştur (X ekseninde soldan sağa)
     const generateRandomStartPosition = () => {
         const mapBounds = 2500; // Harita sınırları
         // Dinamik yükseklik sistemi kullanılacak, burada sadece temel yükseklik
         const height = 100;
 
-        // Kenarlardan rastgele bir pozisyon seç (harita dışından)
-        const side = Math.floor(Math.random() * 4);
-        let x, z;
-
-        switch (side) {
-            case 0: // Kuzey (harita dışı)
-                x = (Math.random() - 0.5) * mapBounds;
-                z = -mapBounds - Math.random() * 500;
-                break;
-            case 1: // Doğu (harita dışı)
-                x = mapBounds + Math.random() * 500;
-                z = (Math.random() - 0.5) * mapBounds;
-                break;
-            case 2: // Güney (harita dışı)
-                x = (Math.random() - 0.5) * mapBounds;
-                z = mapBounds + Math.random() * 500;
-                break;
-            case 3: // Batı (harita dışı)
-                x = -mapBounds - Math.random() * 500;
-                z = (Math.random() - 0.5) * mapBounds;
-                break;
-        }
+        // Sol taraftan (X ekseninde) başla
+        const x = -mapBounds - Math.random() * 500; // Sol taraftan başla
+        const z = (Math.random() - 0.5) * mapBounds; // Z ekseninde rastgele pozisyon
 
         return new Vector3(x, height, z);
     };
 
-    // Rastgele bitiş pozisyonu oluştur (harita dışına)
+    // Rastgele bitiş pozisyonu oluştur (X ekseninde soldan sağa)
     const generateRandomEndPosition = (startPos: Vector3) => {
         const mapBounds = 2500;
         // Dinamik yükseklik sistemi kullanılacak, burada sadece temel yükseklik
         const height = 100;
 
-        // Başlangıç pozisyonunun karşı tarafına git (harita dışına)
-        let x, z;
-
-        if (startPos.x < -mapBounds) { // Batıdan başladıysa doğuya git
-            x = mapBounds + Math.random() * 500;
-            z = (Math.random() - 0.5) * mapBounds;
-        } else if (startPos.x > mapBounds) { // Doğudan başladıysa batıya git
-            x = -mapBounds - Math.random() * 500;
-            z = (Math.random() - 0.5) * mapBounds;
-        } else if (startPos.z < -mapBounds) { // Kuzeyden başladıysa güneye git
-            x = (Math.random() - 0.5) * mapBounds;
-            z = mapBounds + Math.random() * 500;
-        } else { // Güneyden başladıysa kuzeye git
-            x = (Math.random() - 0.5) * mapBounds;
-            z = -mapBounds - Math.random() * 500;
-        }
+        // Sağ tarafa (X ekseninde) git
+        const x = mapBounds + Math.random() * 500; // Sağ tarafa git
+        const z = startPos.z; // Aynı Z pozisyonunda kal (sadece X yönünde hareket)
 
         return new Vector3(x, height, z);
     };
@@ -130,13 +98,12 @@ const Drone: React.FC<DroneProps> = ({
             // Gruba ekle
             droneRef.current.add(droneObject);
         } else {
-            // GLB modeli yüklenemezse basit bir drone oluştur
+            // GLB modeli yoksa basit bir drone oluştur
             const geometry = new CylinderGeometry(2, 2, 8, 8);
-            const material = new MeshStandardMaterial({
+            const material = new MeshBasicMaterial({
                 color: 0xffffff,
-                emissive: 0x222222,
-                metalness: 0.1,
-                roughness: 0.2
+                transparent: true,
+                opacity: 0.8
             });
             const droneObject = new Mesh(geometry, material);
             droneObject.rotation.x = Math.PI / 2; // Yatay pozisyon
@@ -185,36 +152,41 @@ const Drone: React.FC<DroneProps> = ({
                     const progress = animationRef.current.progress();
                     const currentPosition = new Vector3().lerpVectors(startPos, endPos, progress);
 
-                    // Dinamik yükseklik sistemi - ekranın yukarısına çıktıkça yükseklik azalsın, aşağıya indikçe artsın
+                    // Dinamik yükseklik sistemi - güneyden kuzeye giderken yükselsin
                     const screenHeight = 2500; // Ekran yüksekliği (harita sınırları)
                     const normalizedY = (currentPosition.z + screenHeight) / (2 * screenHeight); // 0-1 arası normalize edilmiş Y pozisyonu
 
-                    // Yükseklik hesaplama: üstte çok, altta az (tersine çevrilmiş)
+                    // Yükseklik hesaplama: güneyde alçak, kuzeyde yüksek (normal formül)
                     const baseHeight = 300; // Temel yükseklik (drone'lar için yüksek)
                     const heightVariation = 200; // Yükseklik değişim miktarı
-                    const dynamicHeight = baseHeight - (normalizedY * heightVariation); // Tersine çevrilmiş formül
+                    const dynamicHeight = baseHeight + (normalizedY * heightVariation); // Normal formül (güneyde alçak, kuzeyde yüksek)
 
                     // Y pozisyonunu dinamik yükseklikle güncelle
                     currentPosition.y = dynamicHeight;
 
                     droneRef.current.position.copy(currentPosition);
 
-                    // Uçuş yönüne göre rotasyon
+                    // Uçuş yönüne göre rotasyon - X ekseninde uçuş ama kuzey yönüne 45° açı
                     const direction = new Vector3()
                         .subVectors(endPos, startPos)
                         .normalize();
 
+                    // X ekseninde uçuş için Y rotasyonu (soldan sağa)
                     const angle = Math.atan2(direction.x, direction.z);
                     droneRef.current.rotation.y = angle;
 
-                    // Drone için daha gerçekçi salınım (daha az)
+                    // Drone modelini kuzey yönüne doğru 45 derece eğ (haritayı yataydan görünce yatay uçuyormuş gibi)
+                    droneRef.current.rotation.z = -Math.PI / 5; // 45 derece = π/4 radyan (kuzey yönüne)
+
+                    // Drone için daha gerçekçi salınım (X ekseninde hareket)
                     const time = Date.now() * 0.001;
                     const wobble = Math.sin(time * 0.3) * 0.015; // Daha az salınım
                     droneRef.current.position.y += wobble;
 
-                    // Hafif yan yana hareket (rüzgar etkisi)
+                    // Sadece X yönünde hafif hareket (rüzgar etkisi) - Z yönünde hareket yok
                     const sideWobble = Math.sin(time * 0.2) * 0.01;
-                    droneRef.current.position.x += sideWobble;
+                    droneRef.current.position.x += sideWobble; // X yönünde hafif hareket
+                    // droneRef.current.position.z += sideWobble; // Z yönünde hareket kaldırıldı
                 }
             }
         });
@@ -275,9 +247,10 @@ const Drone: React.FC<DroneProps> = ({
         const generalWobble = Math.sin(time * 0.4) * 0.015;
         droneRef.current.position.y += generalWobble;
 
-        // Hafif ileri-geri hareket
+        // Sadece X yönünde hafif ileri-geri hareket (Z yönünde hareket yok)
         const forwardBackward = Math.sin(time * 0.3) * 0.01;
-        droneRef.current.position.z += forwardBackward;
+        droneRef.current.position.x += forwardBackward;
+        // droneRef.current.position.z += forwardBackward; // Z yönünde hareket kaldırıldı
     });
 
     return (
