@@ -503,6 +503,80 @@ function MapControlsWrapper({ controlsRef, isZoomingRef, desiredDistanceRef, zoo
 function Harita() {
     const [showMarker, setShowMarker] = useState(false);
     const [showPanel, setShowPanel] = useState(false);
+    const [ambientOn, setAmbientOn] = useState(true);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    // Ambient bird sound controller
+    useEffect(() => {
+        if (!audioRef.current) {
+            const src = (process.env.PUBLIC_URL || '') + '/bird-voice.mp3';
+            const audio = new Audio(src);
+            audio.loop = true;
+            audio.volume = 0.2; // 0.0 - 1.0
+            audio.muted = false;
+            audio.setAttribute('playsinline', 'true');
+            audioRef.current = audio;
+
+            // Basit yükleme/hatâ loglaması
+            const onCanPlay = () => console.log('[audio] ready:', src);
+            const onError = (e: any) => console.error('[audio] load/play error:', e);
+            audio.addEventListener('canplaythrough', onCanPlay, { once: true });
+            audio.addEventListener('error', onError);
+            // Temizleme: component unmount
+            const cleanupAudioLogs = () => {
+                audio.removeEventListener('canplaythrough', onCanPlay as any);
+                audio.removeEventListener('error', onError as any);
+            };
+            // Attach cleanup to ref for unmount
+            // @ts-ignore attach cleanup
+            audio._cleanupLogs = cleanupAudioLogs;
+        }
+
+        let resumeOnGesture: ((e?: any) => void) | null = null;
+        const detach = () => {
+            if (!resumeOnGesture) return;
+            window.removeEventListener('pointerdown', resumeOnGesture);
+            window.removeEventListener('touchstart', resumeOnGesture);
+            window.removeEventListener('keydown', resumeOnGesture);
+            resumeOnGesture = null;
+        };
+
+        const tryPlay = async () => {
+            try {
+                await audioRef.current?.play();
+            } catch {
+                // Autoplay engellendiyse ilk kullanıcı etkileşimiyle tekrar dene
+                resumeOnGesture = async () => {
+                    try {
+                        await audioRef.current?.play();
+                        detach();
+                    } catch { }
+                };
+                window.addEventListener('pointerdown', resumeOnGesture, { once: true });
+                window.addEventListener('touchstart', resumeOnGesture, { once: true });
+                window.addEventListener('keydown', resumeOnGesture, { once: true });
+            }
+        };
+
+        if (ambientOn) {
+            tryPlay();
+        } else {
+            detach();
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+            }
+        }
+
+        return () => {
+            detach();
+            if (audioRef.current) {
+                audioRef.current.pause();
+                // @ts-ignore
+                if (audioRef.current._cleanupLogs) audioRef.current._cleanupLogs();
+            }
+        };
+    }, [ambientOn]);
 
     return (
         <div style={{
@@ -572,6 +646,44 @@ function Harita() {
                 }}
             >
                 {(showMarker || showPanel) ? 'özellikleri kapat' : 'özellikleri gör'}
+            </button>
+
+            {/* Sol alt ambient ses toggler */}
+            <button
+                onClick={() => {
+                    setAmbientOn(v => {
+                        const next = !v;
+                        if (next) {
+                            // Açılırken hemen play dene
+                            audioRef.current?.play().catch(() => {
+                                // gesture sonrası play denenecek (effect içinde)
+                            });
+                        } else {
+                            // Kapanırken hemen durdur
+                            if (audioRef.current) {
+                                audioRef.current.pause();
+                                audioRef.current.currentTime = 0;
+                            }
+                        }
+                        return next;
+                    });
+                }}
+                style={{
+                    position: 'absolute',
+                    left: 16,
+                    bottom: 16,
+                    padding: '10px 12px',
+                    background: ambientOn ? '#1db954' : '#222',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    zIndex: 1001
+                }}
+                title={ambientOn ? 'Kuş sesi açık' : 'Kuş sesi kapalı'}
+            >
+                {ambientOn ? 'Kuş sesi: Açık' : 'Kuş sesi: Kapalı'}
             </button>
             {/* Sağdan kayan panel */}
             <div
